@@ -109,6 +109,21 @@ class EEGDataset(torch.utils.data.Dataset):
     }
 
 
+class GNSSDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dirs, mode='train'):
+        from universal_dataset import UniversalDataset
+        self.inner = UniversalDataset(task_id=132, mode=mode, angle_mode='sincos')
+
+    def __len__(self):
+        return len(self.inner)
+
+    def __getitem__(self, idx):
+        signal, (xyz, az, el) = self.inner[idx]
+        # signal: complex64 [1, 4, 1024]; xyz: [3], az: [2] (sincos), el: [2] (sincos)
+        cond = torch.cat([xyz, az, el], dim=-1).float()  # [7] real
+        return signal.squeeze(0), cond  # [4, 1024] complex64, [7] float32
+
+
 class Collator:
     def __init__(self, params):
         self.params = params
@@ -178,7 +193,7 @@ class Collator:
 
                 norm_data = data / cond.std()
                 norm_cond = cond / cond.std()
-                
+
                 record['data'] = norm_data.reshape(512, 1, 1)
                 record['cond'] = norm_cond.reshape(512)
             data = torch.stack([record['data'] for record in minibatch if 'data' in record])
@@ -186,7 +201,27 @@ class Collator:
             return {
                 'data': torch.view_as_real(data),
                 'cond': torch.view_as_real(cond),
-            } 
+            }
+
+        ## GNSS Case
+        elif task_id == 4:
+            # minibatch is a list of (signal, cond) tuples from GNSSDataset
+            signals = [s for s, _ in minibatch]
+            conds   = [c for _, c in minibatch]
+
+            data = torch.stack(signals)          # [B, 4, 1024] complex64
+            data = data.permute(0, 2, 1)         # [B, 1024, 4]
+            data = torch.view_as_real(data)      # [B, 1024, 4, 2]
+
+            mean = data.mean()
+            std  = data.std() + 1e-8
+            data = (data - mean) / std
+
+            cond = torch.stack(conds)            # [B, 7] real float32
+            # Pack as [B, 7, 2] with zero imaginary part, matching MLPConditionEmbedding
+            cond = torch.stack([cond, torch.zeros_like(cond)], dim=-1)  # [B, 7, 2]
+
+            return {'data': data, 'cond': cond}
 
         else:
             raise ValueError("Unexpected task_id.")
@@ -203,6 +238,8 @@ def from_path(params, is_distributed=False):
         dataset = MIMODataset(data_dir)
     elif task_id == 3:
         dataset = EEGDataset(data_dir)
+    elif task_id == 4:
+        dataset = GNSSDataset(data_dir, mode='train')
     else:
         raise ValueError("Unexpected task_id.")
     return torch.utils.data.DataLoader(
@@ -228,6 +265,8 @@ def from_path_inference(params):
         dataset = MIMODataset(cond_dir)
     elif task_id == 3:
         dataset = EEGDataset(cond_dir)
+    elif task_id == 4:
+        dataset = GNSSDataset(cond_dir, mode='test')
     else:
         raise ValueError("Unexpected task_id.")
     return torch.utils.data.DataLoader(

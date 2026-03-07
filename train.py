@@ -34,7 +34,9 @@ def train(params):
         model = tfdiff_eeg(params).cuda()
     elif params.task_id==1:
         model = tfdiff_mimo(params).cuda()
-    else:    
+    elif params.task_id==4:
+        model = tfdiff_fmcw(params).cuda()
+    else:
         model = tfdiff_WiFi(params).cuda()
     _train_impl(0, model, dataset, params)
 
@@ -55,7 +57,9 @@ def train_distributed(replica_id, replica_count, port, params):
         model = tfdiff_mimo(params).to(device)
     elif params.task_id == 3:
         model = tfdiff_eeg(params).to(device)
-    else:    
+    elif params.task_id == 4:
+        model = tfdiff_fmcw(params).to(device)
+    else:
         raise ValueError("Unexpected task_id.")
     model = DistributedDataParallel(model, device_ids=[replica_id])
     _train_impl(replica_id, model, dataset, params)

@@ -286,6 +286,8 @@ def main(args):
         model = tfdiff_mimo(AttrDict(params)).to(device)
     elif args.task_id==3:
         model = tfdiff_eeg(AttrDict(params)).to(device)
+    elif args.task_id==4:
+        model = tfdiff_fmcw(AttrDict(params)).to(device)
     model.load_state_dict(checkpoint['model'])
     model.eval()
     model.params.override(params)
@@ -306,7 +308,7 @@ def main(args):
             data = features['data']
             cond = features['cond']
             
-            if args.task_id in [0, 1]:
+            if args.task_id in [0, 1, 4]:
                 # pred = diffusion.sampling(model, cond, device)
                 # pred = diffusion.robust_sampling(model, cond, device)
                 # pred = diffusion.fast_sampling(model, cond, device)
@@ -320,8 +322,10 @@ def main(args):
                     # Save the SSIM.
                     ssim_list.append(cur_ssim.item())
                     
-                    if args.task_id:
+                    if args.task_id == 1:
                         save_fmcw(out_dir, d_sample.cpu().detach(), p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch,b)
+                    elif args.task_id == 4:
+                        save(out_dir, p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch, b)
                     else:
                         save_wifi(out_dir, d_sample.cpu().detach(), p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch,b)
                 cur_batch += 1

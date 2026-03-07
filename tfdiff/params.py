@@ -187,4 +187,50 @@ params_eeg = AttrDict(
 )
 
 
-all_params = [params_wifi, params_fmcw, params_mimo, params_eeg]
+# =======================
+# GNSS Parameter Setting.
+# =======================
+params_gnss = AttrDict(
+    # task
+    task_id=4,
+
+    # data dimensions
+    sample_rate=1024,       # time samples per signal
+    input_dim=4,            # 4 antenna channels
+    extra_dim=[4],
+    cond_dim=7,             # x, y, z, sin(az), cos(az), sin(el), cos(el)
+
+    # training
+    batch_size=16,
+    learning_rate=1e-3,
+    max_iter=None,
+    max_grad_norm=None,
+
+    # inference
+    inference_batch_size=1,
+    robust_sampling=True,
+
+    # model
+    embed_dim=256,
+    hidden_dim=256,
+    num_heads=8,
+    num_block=32,
+    dropout=0.0,
+    mlp_ratio=4,
+    learn_tfdiff=False,
+
+    # diffusion
+    signal_diffusion=True,
+    max_step=100,
+    noise_schedule=np.linspace(1e-4, 0.003, 100).tolist(),
+    blur_schedule=((1e-5)**2 * np.ones(100)).tolist(),
+
+    # directories (override via CLI)
+    log_dir='./logs/gnss',
+    model_dir='./model/gnss',
+    data_dir=[],
+    out_dir='./dataset/gnss/output',
+    cond_dir=[],
+)
+
+all_params = [params_wifi, params_fmcw, params_mimo, params_eeg, params_gnss]
