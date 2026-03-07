@@ -201,7 +201,7 @@ params_gnss = AttrDict(
     cond_dim=7,             # x, y, z, sin(az), cos(az), sin(el), cos(el)
 
     # training
-    batch_size=16,
+    batch_size=4,
     learning_rate=1e-3,
     max_iter=None,
     max_grad_norm=None,
@@ -211,10 +211,10 @@ params_gnss = AttrDict(
     robust_sampling=True,
 
     # model
-    embed_dim=256,
-    hidden_dim=256,
+    embed_dim=128,
+    hidden_dim=128,
     num_heads=8,
-    num_block=32,
+    num_block=16,
     dropout=0.0,
     mlp_ratio=4,
     learn_tfdiff=False,
