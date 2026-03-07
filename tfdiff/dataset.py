@@ -242,12 +242,13 @@ def from_path(params, is_distributed=False):
         dataset = GNSSDataset(data_dir, mode='train')
     else:
         raise ValueError("Unexpected task_id.")
+    num_workers = getattr(params, 'num_workers', 8)
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=params.batch_size,
         collate_fn=Collator(params).collate,
         shuffle=not is_distributed,
-        num_workers=8,
+        num_workers=num_workers,
         sampler=DistributedSampler(dataset) if is_distributed else None,
         pin_memory=True,
         drop_last=True,

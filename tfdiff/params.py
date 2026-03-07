@@ -209,6 +209,7 @@ params_gnss = AttrDict(
     # inference
     inference_batch_size=1,
     robust_sampling=True,
+    num_workers=2,
 
     # model
     embed_dim=128,
