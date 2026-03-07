@@ -81,7 +81,7 @@ class SignalDiffusion(nn.Module):
 
     def degrade_fn(self, x_0, t, task_id):
         device = x_0.device
-        if task_id in [0, 1]:
+        if task_id in [0, 1, 4]:
             noise_weight = self.noise_weights[t, :].unsqueeze(-1).unsqueeze(-1).to(device) # equivalent gaussian noise weights, [B, N, 1, 1, 1]
             info_weight = self.info_weights[t, :].unsqueeze(-1).unsqueeze(-1).to(device) # equivalent original info weights, [B, N, 1, 1, 1]
         if task_id in [2, 3]:
