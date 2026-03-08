@@ -2,6 +2,7 @@ import math
 import numpy as np
 import os
 import torch
+import h5py
 import scipy.io as scio
 import matplotlib.pyplot as plt
 import numpy as np
@@ -80,6 +81,44 @@ def cal_SNR_MIMO(predict, truth):
     PN = np.sum(np.abs(predict_complex - truth_complex)**2, axis=(-1, -2, -3))  # power of noise
     ratio = PS / PN
     return 10 * np.log10(ratio)
+
+def save_gnss(out_dir, pred, cond, global_idx):
+    """
+    Save a generated GNSS sample in the format UniversalDataset reads:
+      - generated.h5  : dataset 'received_signals', shape [N, 4, 1024] complex64
+      - generated.txt : tab-separated [h5_index, x, y, z, az_deg, el_deg]
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    # pred: [1, 1024, 4] complex → [4, 1024]
+    signal = pred.squeeze(0).permute(1, 0).numpy().astype(np.complex64)
+
+    # cond: [1, 7] complex (zero imag) → 7 real scalars
+    c = cond.squeeze(0).real.numpy()           # [x, y, z, sin_az, cos_az, sin_el, cos_el]
+    x, y, z = float(c[0]), float(c[1]), float(c[2])
+    az_deg = float(np.degrees(np.arctan2(c[3], c[4])))
+    el_deg = float(np.degrees(np.arctan2(c[5], c[6])))
+
+    h5_path  = os.path.join(out_dir, 'generated.h5')
+    txt_path = os.path.join(out_dir, 'generated.txt')
+
+    # Append signal to HDF5
+    with h5py.File(h5_path, 'a') as f:
+        if 'received_signals' not in f:
+            f.create_dataset('received_signals', data=signal[np.newaxis],
+                             maxshape=(None, *signal.shape), dtype=np.complex64)
+        else:
+            ds = f['received_signals']
+            ds.resize(ds.shape[0] + 1, axis=0)
+            ds[-1] = signal
+
+    # Append metadata row to TXT
+    write_header = not os.path.exists(txt_path)
+    with open(txt_path, 'a') as f:
+        if write_header:
+            f.write('h5_index\tx\ty\tz\taz_deg\tel_deg\n')
+        f.write(f'{global_idx}\t{x:.6f}\t{y:.6f}\t{z:.6f}\t{az_deg:.4f}\t{el_deg:.4f}\n')
+
 
 def save(out_dir, data, cond, batch, index=0):
     os.makedirs(out_dir, exist_ok=True)
@@ -325,7 +364,7 @@ def main(args):
                     if args.task_id == 1:
                         save_fmcw(out_dir, d_sample.cpu().detach(), p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch,b)
                     elif args.task_id == 4:
-                        save(out_dir, p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch, b)
+                        save_gnss(out_dir, p_sample.cpu().detach(), cond_samples[b].cpu().detach(), global_idx=cur_batch)
                     else:
                         save_wifi(out_dir, d_sample.cpu().detach(), p_sample.cpu().detach(), cond_samples[b].cpu().detach(), cur_batch,b)
                 cur_batch += 1

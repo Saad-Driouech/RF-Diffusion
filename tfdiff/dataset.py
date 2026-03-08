@@ -118,9 +118,14 @@ class GNSSDataset(torch.utils.data.Dataset):
         return len(self.inner)
 
     def __getitem__(self, idx):
-        signal, (xyz, az, el) = self.inner[idx]
-        # signal: complex64 [1, 4, 1024]; xyz: [3], az: [2] (sincos), el: [2] (sincos)
-        cond = torch.cat([xyz, az, el], dim=-1).float()  # [7] real
+        # UniversalDataset returns (signal, position, az_angle, el_angle) — flat 4-tuple
+        signal, position, az_angle, el_angle = self.inner[idx]
+        # signal: complex64 [1, 4, 1024]; position: [3]; az/el: [2] each (sincos)
+        cond = torch.cat([
+            position.float(),
+            az_angle.float().reshape(-1),   # [2]: sin_az, cos_az
+            el_angle.float().reshape(-1),   # [2]: sin_el, cos_el
+        ], dim=0)  # [7]
         return signal.squeeze(0), cond  # [4, 1024] complex64, [7] float32
 
 
