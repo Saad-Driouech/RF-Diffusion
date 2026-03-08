@@ -111,7 +111,7 @@ class EEGDataset(torch.utils.data.Dataset):
 
 class GNSSDataset(torch.utils.data.Dataset):
     def __init__(self, data_dirs, mode='train'):
-        from universal_dataset import UniversalDataset
+        from UniversalDataLoader import UniversalDataset
         self.inner = UniversalDataset(task_id=132, mode=mode, angle_mode='sincos')
 
     def __len__(self):
