@@ -70,6 +70,7 @@ class tfdiffLearner:
             'iter': self.iter,
             'model': {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in model_state.items()},
             'optimizer': {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in self.optimizer.state_dict().items()},
+            'lr_scheduler': self.lr_scheduler.state_dict(),
             'params': dict(self.params),
         }
 
@@ -79,6 +80,8 @@ class tfdiffLearner:
         else:
             self.model.load_state_dict(state_dict['model'])
         self.optimizer.load_state_dict(state_dict['optimizer'])
+        if 'lr_scheduler' in state_dict:
+            self.lr_scheduler.load_state_dict(state_dict['lr_scheduler'])
         self.iter = state_dict['iter']
 
     def save_to_checkpoint(self, filename='weights'):

@@ -77,6 +77,8 @@ def main(args):
         params.log_dir = args.log_dir
     if args.max_iter is not None:
         params.max_iter = args.max_iter
+    if args.learning_rate is not None:
+        params.learning_rate = args.learning_rate
     replica_count = device_count()
     if replica_count > 1:
         if params.batch_size % replica_count != 0:
@@ -104,4 +106,6 @@ if __name__ == '__main__':
     parser.add_argument('--max_iter', default=None, type=int,
                         help='maximum number of training iteration')
     parser.add_argument('--batch_size', default=None, type=int)
+    parser.add_argument('--learning_rate', default=None, type=float,
+                        help='override learning rate (useful when resuming after scheduler state was lost)')
     main(parser.parse_args())
