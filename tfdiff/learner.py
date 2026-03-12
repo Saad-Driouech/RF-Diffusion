@@ -92,7 +92,7 @@ class tfdiffLearner:
         if os.name == 'nt':
             torch.save(self.state_dict(), link_name)
         else:
-            if os.path.islink(link_name):
+            if os.path.lexists(link_name):
                 os.unlink(link_name)
             os.symlink(save_basename, link_name)
 
