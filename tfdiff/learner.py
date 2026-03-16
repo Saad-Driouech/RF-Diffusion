@@ -12,22 +12,34 @@ from tfdiff.dataset import _nested_map
 
 
 class tfdiffLoss(nn.Module):
-    def __init__(self, w=0.1):
+    """Combined time + frequency domain MSE loss.
+
+    Inputs are real-valued tensors of shape [B, N, C, 2] where the last
+    dimension holds [real, imag]. The frequency term penalises spectral
+    errors that plain time-domain MSE tends to ignore (e.g. wrong
+    bandwidth or spectral shape).
+
+    freq_weight: weight on the frequency term. Start at 0.1; increase
+    toward 1.0 if PSD mismatch persists after many iterations.
+    """
+
+    def __init__(self, freq_weight: float = 0.1):
         super().__init__()
-        self.w = w
+        self.freq_weight = freq_weight
 
-    def forward(self, target, est, target_noise=None, est_noise=None):
-        target_fft = torch.fft.fft(target, dim=1) 
-        est_fft = torch.fft(est)
-        t_loss = self.complex_mse_loss(target, est)
-        f_loss = self.complex_mse_loss(target_fft, est_fft)
-        n_loss = self.complex_mse_loss(target_noise, est_noise) if (target_noise and est_noise) else 0.
-        return (t_loss + f_loss + self.w * n_loss)
+    def forward(self, target, est):
+        # ── time-domain MSE ──────────────────────────────────────────
+        t_loss = torch.mean((target - est) ** 2)
 
-    def complex_mse_loss(self, target, est):
-        target = torch.view_as_complex(target)
-        est = torch.view_as_complex(est)
-        return torch.mean(torch.abs(target-est)**2)
+        # ── frequency-domain MSE ─────────────────────────────────────
+        # Convert [B, N, C, 2] → complex [B, N, C], then FFT over time
+        t_c = torch.view_as_complex(target.contiguous())   # [B, N, C]
+        p_c = torch.view_as_complex(est.contiguous())      # [B, N, C]
+        t_fft = torch.fft.fft(t_c, dim=1)
+        p_fft = torch.fft.fft(p_c, dim=1)
+        f_loss = torch.mean(torch.abs(t_fft - p_fft) ** 2)
+
+        return t_loss + self.freq_weight * f_loss
         
 
 class tfdiffLearner:
@@ -55,7 +67,7 @@ class tfdiffLearner:
         self.params = params
         self.iter = 0
         self.is_master = True
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = tfdiffLoss() if self.task_id == 4 else nn.MSELoss()
         self.summary_writer = None
         # Load a fixed held-out validation batch for GNSS visualizations
         if self.task_id == 4:
