@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.signal
 import os
 import torch
 import torch.nn as nn
@@ -9,6 +10,17 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from tfdiff.diffusion import SignalDiffusion, GaussianDiffusion
 from tfdiff.dataset import _nested_map
+
+_GNSS_FS = 40.5e6  # GNSS sampling frequency (Hz)
+
+
+def _gnss_spectrogram_db(x, fs=_GNSS_FS, noverlap=64):
+    """Return (f, t, Sxx_dB) using scipy's spectrogram (Blackman window, two-sided PSD)."""
+    f, t, Sxx = scipy.signal.spectrogram(
+        x, fs=fs, nperseg=128, noverlap=noverlap,
+        window='blackman', return_onesided=False, detrend=False, mode='psd')
+    Sxx_db = 10 * np.log10(np.fft.fftshift(Sxx, axes=0) + 1e-20)
+    return np.fft.fftshift(f), t, Sxx_db
 
 
 class tfdiffLoss(nn.Module):
@@ -231,18 +243,23 @@ class tfdiffLearner:
             writer.add_figure(f'{prefix}/psd_per_antenna', fig, iter)
             plt.close(fig)
 
-            # ── STFT Spectrogram comparison — antenna 0 ────────────────────────
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-            n_fft, hop = 64, 16
-            for ax, sig, title in zip(axes, [x0[:, 0], xh[:, 0]], ['Real', 'Generated']):
-                spec = np.lib.stride_tricks.sliding_window_view(sig.real, n_fft)[::hop] * np.hanning(n_fft)
-                spec_db = 20 * np.log10(np.abs(np.fft.fft(spec, axis=-1)[:, :n_fft//2]).T + 1e-9)
-                im = ax.imshow(spec_db, aspect='auto', origin='lower', cmap='viridis')
-                ax.set_title(f'{title} Spectrogram (Ant 1, real part)')
-                ax.set_xlabel('Time Frame')
-                ax.set_ylabel('Frequency Bin')
-                plt.colorbar(im, ax=ax, format='%+2.0f dB')
-            plt.suptitle(f'[{prefix}] STFT Spectrogram — iter {iter}')
+            # ── Spectrogram comparison — all 4 antennas (2×2 grid, Real | Generated) ──
+            fig, axes = plt.subplots(4, 2, figsize=(12, 16))
+            for i in range(4):
+                f_ax, t_ax_s, Sxx_real = _gnss_spectrogram_db(x0[:, i])
+                _,    _,      Sxx_gen  = _gnss_spectrogram_db(xh[:, i])
+                vmin = min(Sxx_real.min(), Sxx_gen.min())
+                vmax = max(Sxx_real.max(), Sxx_gen.max())
+                extent = [t_ax_s[0] * 1e3, t_ax_s[-1] * 1e3, f_ax[0], f_ax[-1]]
+                for ax, Sxx, title in zip(axes[i], [Sxx_real, Sxx_gen], ['Real', 'Generated']):
+                    im = ax.imshow(Sxx, aspect='auto', origin='lower', cmap='turbo',
+                                   vmin=vmin, vmax=vmax, extent=extent,
+                                   interpolation='nearest')
+                    ax.set_title(f'Antenna {i+1} — {title}')
+                    ax.set_xlabel('t [ms]')
+                    ax.set_ylabel('f [Hz]')
+                    fig.colorbar(im, ax=ax, format='%+.0f dB-Hz')
+            plt.suptitle(f'[{prefix}] Spectrogram — iter {iter}')
             plt.tight_layout()
             writer.add_figure(f'{prefix}/spectrogram', fig, iter)
             plt.close(fig)
@@ -262,9 +279,9 @@ class tfdiffLearner:
             writer.add_figure(f'{prefix}/time_amplitude', fig, iter)
             plt.close(fig)
 
-            # ── IQ Constellation — antennas 0 & 1 ─────────────────────────────
-            fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-            for i, ax in enumerate(axes):
+            # ── IQ Constellation — all 4 antennas ─────────────────────────────
+            fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+            for i, ax in enumerate(axes.flat):
                 ax.scatter(x0[:, i].real, x0[:, i].imag, s=1, alpha=0.25, label='Real')
                 ax.scatter(xh[:, i].real, xh[:, i].imag, s=1, alpha=0.25, label='Generated')
                 ax.set_title(f'IQ Constellation — Antenna {i+1}')
@@ -278,18 +295,19 @@ class tfdiffLearner:
             writer.add_figure(f'{prefix}/iq_constellation', fig, iter)
             plt.close(fig)
 
-            # ── Forward degradation visualisation ─────────────────────────────
-            fig, axes = plt.subplots(1, 5, figsize=(16, 3))
+            # ── Forward degradation — Antenna 1, 5 timesteps ──────────────────
+            fig, axes = plt.subplots(1, 5, figsize=(20, 4))
             for ax, step in zip(axes, [0, 25, 50, 75, 99]):
                 t_s = step * torch.ones(1, dtype=torch.int64)
                 x_deg = self.diffusion.degrade_fn(data[:1].cpu(), t_s, task_id=4)
                 sig_deg = torch.view_as_complex(x_deg.contiguous())[0, :, 0].numpy()
-                spec = np.lib.stride_tricks.sliding_window_view(sig_deg.real, n_fft)[::hop] * np.hanning(n_fft)
-                spec_db = 20 * np.log10(np.abs(np.fft.fft(spec, axis=-1)[:, :n_fft//2]).T + 1e-9)
-                ax.imshow(spec_db, aspect='auto', origin='lower', cmap='viridis')
+                _, t_ax_s, Sxx_db = _gnss_spectrogram_db(sig_deg)
+                ax.imshow(Sxx_db, aspect='auto', origin='lower', cmap='turbo',
+                          interpolation='nearest')
                 ax.set_title(f't = {step}')
-                ax.axis('off')
-            plt.suptitle(f'[{prefix}] Forward Degradation (Ant 1, real part)')
+                ax.set_xlabel('t [ms]')
+                ax.set_ylabel('f [Hz]' if step == 0 else '')
+            plt.suptitle(f'[{prefix}] Forward Degradation — Antenna 1 — iter {iter}')
             plt.tight_layout()
             writer.add_figure(f'{prefix}/degradation_steps', fig, iter)
             plt.close(fig)
