@@ -1,6 +1,20 @@
 import numpy as np
 
 
+def _cosine_beta_schedule(T: int, s: float = 0.008) -> np.ndarray:
+    """Cosine noise schedule (Nichol & Dhariwal 2021).
+
+    Produces β values that change slowly at the start and end of the
+    diffusion process, avoiding the abrupt degradation near t≈75 that
+    the linear schedule can cause.
+    """
+    t = np.arange(T + 1, dtype=np.float64)
+    f = np.cos((t / T + s) / (1.0 + s) * np.pi / 2.0) ** 2
+    alpha_bar = f / f[0]
+    betas = 1.0 - alpha_bar[1:] / alpha_bar[:-1]
+    return np.clip(betas, 1e-6, 0.999)
+
+
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
         super(AttrDict, self).__init__(*args, **kwargs)
@@ -223,7 +237,8 @@ params_gnss = AttrDict(
     # diffusion
     signal_diffusion=True,
     max_step=100,
-    noise_schedule=np.linspace(1e-4, 0.003, 100).tolist(),
+    # noise_schedule=np.linspace(1e-4, 0.003, 100).tolist(),  # old linear schedule (caused t≈75 spike)
+    noise_schedule=_cosine_beta_schedule(100).tolist(),
     blur_schedule=((1e-5)**2 * np.ones(100)).tolist(),
 
     # directories (override via CLI)
