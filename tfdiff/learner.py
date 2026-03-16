@@ -69,9 +69,10 @@ class tfdiffLearner:
         self.is_master = True
         self.loss_fn = tfdiffLoss() if self.task_id == 4 else nn.MSELoss()
         self.summary_writer = None
-        # Load a fixed held-out validation batch for GNSS visualizations
+        # Load fixed batches for GNSS visualizations (train to check overfitting, val to check generalisation)
         if self.task_id == 4:
-            self.val_batch = self._load_gnss_val_batch(n_samples=4)
+            self.val_batch   = self._load_gnss_batch(mode='test',  n_samples=4)
+            self.train_batch = self._load_gnss_batch(mode='train', n_samples=4)
 
     def state_dict(self):
         if hasattr(self.model, 'module') and isinstance(self.model.module, nn.Module):
@@ -158,21 +159,26 @@ class tfdiffLearner:
         self.optimizer.step()
         return loss
 
-    def _load_gnss_val_batch(self, n_samples=4):
-        """Load a fixed held-out batch from the GNSS test split."""
+    def _load_gnss_batch(self, mode='test', n_samples=4):
+        """Load a fixed batch from the GNSS dataset (mode='train' or 'test')."""
         from tfdiff.dataset import GNSSDataset, Collator
-        val_ds = GNSSDataset(self.params.data_dir, mode='test')
+        ds = GNSSDataset(self.params.data_dir, mode=mode)
         collator = Collator(self.params)
-        samples = [val_ds[i] for i in range(min(n_samples, len(val_ds)))]
+        samples = [ds[i] for i in range(min(n_samples, len(ds)))]
         batch = collator.collate(samples)
         return {k: v.to(self.device) for k, v in batch.items()}
 
-    def _write_gnss_summary(self, writer, iter):
-        """Log GNSS-specific panels to TensorBoard."""
+    def _write_gnss_summary(self, writer, iter, batch, prefix):
+        """Log GNSS-specific panels to TensorBoard for a given batch.
+
+        prefix: 'train' or 'val' — used as the TensorBoard tag namespace.
+        Calling this for both splits lets you compare plots side-by-side
+        in TensorBoard to detect overfitting.
+        """
         self.model.eval()
         with torch.no_grad():
-            data = self.val_batch['data']   # [B, 1024, 4, 2]
-            cond = self.val_batch['cond']   # [B, 7, 2]
+            data = batch['data']   # [B, 1024, 4, 2]
+            cond = batch['cond']   # [B, 7, 2]
             B = data.shape[0]
             t_max = (self.diffusion.max_step - 1) * torch.ones(B, dtype=torch.int64, device=self.device)
 
@@ -188,12 +194,12 @@ class tfdiffLearner:
             fft_real = torch.fft.fft(x0_c, dim=1)
             fft_pred = torch.fft.fft(xh_c, dim=1)
             freq_mse = torch.mean(torch.abs(fft_real - fft_pred) ** 2).item()
-            writer.add_scalar('val/freq_mse', freq_mse, iter)
+            writer.add_scalar(f'{prefix}/freq_mse', freq_mse, iter)
 
             # Reconstruction SNR (dB)
             sig_pwr  = torch.mean(torch.abs(x0_c) ** 2).item()
             noise_pwr = torch.mean(torch.abs(x0_c - xh_c) ** 2).item() + 1e-12
-            writer.add_scalar('val/snr_db', 10 * np.log10(sig_pwr / noise_pwr), iter)
+            writer.add_scalar(f'{prefix}/snr_db', 10 * np.log10(sig_pwr / noise_pwr), iter)
 
             # Per-step reconstruction loss at t=0,25,50,75,99
             for step in [0, 25, 50, 75, 99]:
@@ -201,7 +207,7 @@ class tfdiffLearner:
                 x_s = self.diffusion.degrade_fn(data.cpu(), t_s, task_id=4).to(self.device)
                 x_s_hat = self.model(x_s, t_s.to(self.device), cond)
                 step_loss = self.loss_fn(data, x_s_hat).item()
-                writer.add_scalar(f'val/recon_loss_t{step}', step_loss, iter)
+                writer.add_scalar(f'{prefix}/recon_loss_t{step}', step_loss, iter)
 
             # Use first sample for all figure panels
             x0 = x0_c[0].cpu().numpy()     # [1024, 4] complex
@@ -220,9 +226,9 @@ class tfdiffLearner:
                 ax.set_ylabel('Power')
                 ax.legend(fontsize=7)
                 ax.grid(True, which='both', linestyle='--', linewidth=0.4)
-            plt.suptitle(f'Power Spectral Density — iter {iter}')
+            plt.suptitle(f'[{prefix}] Power Spectral Density — iter {iter}')
             plt.tight_layout()
-            writer.add_figure('val/psd_per_antenna', fig, iter)
+            writer.add_figure(f'{prefix}/psd_per_antenna', fig, iter)
             plt.close(fig)
 
             # ── STFT Spectrogram comparison — antenna 0 ────────────────────────
@@ -236,9 +242,9 @@ class tfdiffLearner:
                 ax.set_xlabel('Time Frame')
                 ax.set_ylabel('Frequency Bin')
                 plt.colorbar(im, ax=ax, format='%+2.0f dB')
-            plt.suptitle(f'STFT Spectrogram — iter {iter}')
+            plt.suptitle(f'[{prefix}] STFT Spectrogram — iter {iter}')
             plt.tight_layout()
-            writer.add_figure('val/spectrogram', fig, iter)
+            writer.add_figure(f'{prefix}/spectrogram', fig, iter)
             plt.close(fig)
 
             # ── Time-domain amplitude — first 256 samples per antenna ──────────
@@ -251,9 +257,9 @@ class tfdiffLearner:
                 ax.set_xlabel('Sample')
                 ax.legend(fontsize=7)
                 ax.grid(True, linestyle='--', linewidth=0.4)
-            plt.suptitle(f'Time-domain Amplitude (first 256 samples) — iter {iter}')
+            plt.suptitle(f'[{prefix}] Time-domain Amplitude (first 256 samples) — iter {iter}')
             plt.tight_layout()
-            writer.add_figure('val/time_amplitude', fig, iter)
+            writer.add_figure(f'{prefix}/time_amplitude', fig, iter)
             plt.close(fig)
 
             # ── IQ Constellation — antennas 0 & 1 ─────────────────────────────
@@ -267,9 +273,9 @@ class tfdiffLearner:
                 ax.legend(fontsize=7, markerscale=6)
                 ax.set_aspect('equal')
                 ax.grid(True, linestyle='--', linewidth=0.4)
-            plt.suptitle(f'IQ Constellation — iter {iter}')
+            plt.suptitle(f'[{prefix}] IQ Constellation — iter {iter}')
             plt.tight_layout()
-            writer.add_figure('val/iq_constellation', fig, iter)
+            writer.add_figure(f'{prefix}/iq_constellation', fig, iter)
             plt.close(fig)
 
             # ── Forward degradation visualisation ─────────────────────────────
@@ -283,9 +289,9 @@ class tfdiffLearner:
                 ax.imshow(spec_db, aspect='auto', origin='lower', cmap='viridis')
                 ax.set_title(f't = {step}')
                 ax.axis('off')
-            plt.suptitle('Forward Degradation (Ant 1, real part)')
+            plt.suptitle(f'[{prefix}] Forward Degradation (Ant 1, real part)')
             plt.tight_layout()
-            writer.add_figure('val/degradation_steps', fig, iter)
+            writer.add_figure(f'{prefix}/degradation_steps', fig, iter)
             plt.close(fig)
 
         self.model.train()
@@ -295,6 +301,7 @@ class tfdiffLearner:
         writer.add_scalar('train/loss', loss, iter)
         writer.add_scalar('train/grad_norm', self.grad_norm, iter)
         if self.task_id == 4 and iter % 500 == 0:
-            self._write_gnss_summary(writer, iter)
+            self._write_gnss_summary(writer, iter, self.val_batch,   prefix='val')
+            self._write_gnss_summary(writer, iter, self.train_batch, prefix='train')
         writer.flush()
         self.summary_writer = writer
