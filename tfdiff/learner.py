@@ -279,6 +279,33 @@ class tfdiffLearner:
             writer.add_figure(f'{prefix}/time_amplitude', fig, iter)
             plt.close(fig)
 
+            # ── IQ time series — I(t) and Q(t) for all 4 antennas ────────────
+            # 4 rows (antennas) × 2 cols (I | Q), first 256 samples
+            fig, axes = plt.subplots(4, 2, figsize=(14, 12))
+            t_iq = np.arange(256)
+            for i in range(4):
+                ax_i, ax_q = axes[i, 0], axes[i, 1]
+                # I component
+                ax_i.plot(t_iq, x0[:256, i].real, label='Real',      alpha=0.85, lw=1.0)
+                ax_i.plot(t_iq, xh[:256, i].real, label='Generated', alpha=0.85, lw=1.0, linestyle='--')
+                ax_i.set_title(f'Antenna {i+1} — I(t)')
+                ax_i.set_xlabel('Sample')
+                ax_i.set_ylabel('I')
+                ax_i.legend(fontsize=7)
+                ax_i.grid(True, linestyle='--', linewidth=0.4)
+                # Q component
+                ax_q.plot(t_iq, x0[:256, i].imag, label='Real',      alpha=0.85, lw=1.0)
+                ax_q.plot(t_iq, xh[:256, i].imag, label='Generated', alpha=0.85, lw=1.0, linestyle='--')
+                ax_q.set_title(f'Antenna {i+1} — Q(t)')
+                ax_q.set_xlabel('Sample')
+                ax_q.set_ylabel('Q')
+                ax_q.legend(fontsize=7)
+                ax_q.grid(True, linestyle='--', linewidth=0.4)
+            plt.suptitle(f'[{prefix}] IQ Time Series (first 256 samples) — iter {iter}')
+            plt.tight_layout()
+            writer.add_figure(f'{prefix}/iq_time_series', fig, iter)
+            plt.close(fig)
+
             # ── IQ Constellation — all 4 antennas ─────────────────────────────
             fig, axes = plt.subplots(2, 2, figsize=(10, 10))
             for i, ax in enumerate(axes.flat):
