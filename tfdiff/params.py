@@ -218,7 +218,7 @@ params_gnss = AttrDict(
     batch_size=4,
     learning_rate=1e-3,
     max_iter=None,
-    max_grad_norm=None,
+    max_grad_norm=1.0,
 
     # inference
     inference_batch_size=1,

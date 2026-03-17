@@ -47,8 +47,8 @@ class tfdiffLoss(nn.Module):
         # Convert [B, N, C, 2] → complex [B, N, C], then FFT over time
         t_c = torch.view_as_complex(target.contiguous())   # [B, N, C]
         p_c = torch.view_as_complex(est.contiguous())      # [B, N, C]
-        t_fft = torch.fft.fft(t_c, dim=1)
-        p_fft = torch.fft.fft(p_c, dim=1)
+        t_fft = torch.fft.fft(t_c, dim=1, norm='ortho')
+        p_fft = torch.fft.fft(p_c, dim=1, norm='ortho')
         f_loss = torch.mean(torch.abs(t_fft - p_fft) ** 2)
 
         return t_loss + self.freq_weight * f_loss
@@ -150,7 +150,8 @@ class tfdiffLearner:
                         self.save_to_checkpoint()
                 # self.prof.step()
                 self.iter += 1
-            self.lr_scheduler.step()
+            if self.task_id != 4:
+                self.lr_scheduler.step()
 
     def train_iter(self, features):
         self.optimizer.zero_grad()
