@@ -51,6 +51,10 @@ class tfdiffLoss(nn.Module):
         p_fft = torch.fft.fft(p_c, dim=1, norm='ortho')
         f_loss = torch.mean(torch.abs(t_fft - p_fft) ** 2)
 
+        # Store components for logging
+        self.last_t_loss = t_loss.item()
+        self.last_f_loss = f_loss.item()
+
         return t_loss + self.freq_weight * f_loss
         
 
@@ -80,6 +84,13 @@ class tfdiffLearner:
         self.iter = 0
         self.is_master = True
         self.loss_fn = tfdiffLoss() if self.task_id == 4 else nn.MSELoss()
+        # LR warmup for GNSS: ramp from 1% of target LR to full LR over lr_warmup_steps iters
+        if self.task_id == 4:
+            warmup_steps = getattr(self.params, 'lr_warmup_steps', 5000)
+            self.lr_warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                self.optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps)
+        else:
+            self.lr_warmup_scheduler = None
         self.summary_writer = None
         # Load fixed batches for GNSS visualizations (train to check overfitting, val to check generalisation)
         if self.task_id == 4:
@@ -150,6 +161,8 @@ class tfdiffLearner:
                         self.save_to_checkpoint()
                 # self.prof.step()
                 self.iter += 1
+                if self.lr_warmup_scheduler is not None:
+                    self.lr_warmup_scheduler.step()
             if self.task_id != 4:
                 self.lr_scheduler.step()
 
@@ -221,6 +234,25 @@ class tfdiffLearner:
                 x_s_hat = self.model(x_s, t_s.to(self.device), cond)
                 step_loss = self.loss_fn(data, x_s_hat).item()
                 writer.add_scalar(f'{prefix}/recon_loss_t{step}', step_loss, iter)
+                # Noisy input amplitude — verify noise schedule magnitude is sane
+                x_s_c = torch.view_as_complex(x_s.contiguous())
+                writer.add_scalar(f'{prefix}/noisy_amp_t{step}', torch.abs(x_s_c).mean().item(), iter)
+
+            # Output amplitude vs target amplitude — early zero-collapse detector
+            output_amp = torch.abs(xh_c).mean().item()
+            target_amp = torch.abs(x0_c).mean().item()
+            writer.add_scalar(f'{prefix}/output_amp', output_amp, iter)
+            writer.add_scalar(f'{prefix}/target_amp', target_amp, iter)
+            writer.add_scalar(f'{prefix}/amp_ratio',  output_amp / (target_amp + 1e-12), iter)
+
+            # Condition vector norm — verify conditioning is active (should be non-zero)
+            writer.add_scalar(f'{prefix}/cond_norm', cond.norm(dim=-1).mean().item(), iter)
+
+            # Weight histograms for key layers every 5000 iters
+            if iter % 5000 == 0:
+                for name, param in self.model.named_parameters():
+                    if any(k in name for k in ('final_layer', 'adaLN_modulation', 'c_embed')):
+                        writer.add_histogram(f'weights/{name}', param.data, iter)
 
             # Use first sample for all figure panels
             x0 = x0_c[0].cpu().numpy()     # [1024, 4] complex
@@ -346,6 +378,10 @@ class tfdiffLearner:
         writer = self.summary_writer or SummaryWriter(self.log_dir, purge_step=iter)
         writer.add_scalar('train/loss', loss, iter)
         writer.add_scalar('train/grad_norm', self.grad_norm, iter)
+        writer.add_scalar('train/lr', self.optimizer.param_groups[0]['lr'], iter)
+        if self.task_id == 4 and hasattr(self.loss_fn, 'last_t_loss'):
+            writer.add_scalar('train/t_loss', self.loss_fn.last_t_loss, iter)
+            writer.add_scalar('train/f_loss', self.loss_fn.last_f_loss, iter)
         if self.task_id == 4 and iter % 500 == 0:
             self._write_gnss_summary(writer, iter, self.val_batch,   prefix='val')
             self._write_gnss_summary(writer, iter, self.train_batch, prefix='train')
