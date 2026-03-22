@@ -81,7 +81,7 @@ class MLPConditionEmbedding(nn.Module):
             cm.ComplexSiLU(),
             cm.ComplexLinear(hidden_dim*4, hidden_dim, bias=True),
         )
-        self.apply(init_weight_norm)
+        self.apply(init_weight_xavier)
 
     def forward(self, c):
         return self.projection(c)
