@@ -172,7 +172,13 @@ class tfdiffLearner:
         cond = features['cond']  # cond, c, [B, C]
         B = data.shape[0]
         # random diffusion step, [B]
-        t = torch.randint(0, self.diffusion.max_step, [B], dtype=torch.int64)
+        # For GNSS, bias toward hard (high-noise) timesteps so t=75/99 get more signal
+        if self.task_id == 4:
+            weights = (1.0 - self.diffusion.alpha_bar)  # [T], larger = harder
+            weights = weights / weights.sum()
+            t = torch.multinomial(weights.unsqueeze(0).expand(B, -1), num_samples=1).squeeze(1)
+        else:
+            t = torch.randint(0, self.diffusion.max_step, [B], dtype=torch.int64)
         degrade_data = self.diffusion.degrade_fn(
             data, t ,self.task_id)  # degrade data, x_t, [B, N, S*A, 2]
         predicted = self.model(degrade_data, t, cond)
@@ -254,9 +260,39 @@ class tfdiffLearner:
                     if any(k in name for k in ('final_layer', 'adaLN_modulation', 'c_embed')):
                         writer.add_histogram(f'weights/{name}', param.data, iter)
 
+            # ── Noise schedule profile (logged once at iter=0) ─────────────────
+            if iter == 0:
+                ts = np.arange(self.diffusion.max_step)
+                noise_profile = self.diffusion.noise_weights.mean(dim=1).cpu().numpy()
+                info_profile  = self.diffusion.info_weights.mean(dim=1).cpu().numpy()
+                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+                axes[0].plot(ts, noise_profile, label='noise_weight (mean)')
+                axes[0].plot(ts, info_profile,  label='info_weight (mean)')
+                axes[0].set_xlabel('Diffusion step t')
+                axes[0].set_title('Mean weight per timestep')
+                axes[0].legend()
+                axes[0].grid(True, linestyle='--', linewidth=0.4)
+                axes[1].plot(ts, noise_profile + info_profile)
+                axes[1].set_xlabel('Diffusion step t')
+                axes[1].set_title('noise_weight + info_weight (total amplitude)')
+                axes[1].grid(True, linestyle='--', linewidth=0.4)
+                plt.tight_layout()
+                writer.add_figure('diagnostics/noise_schedule', fig, iter)
+                plt.close(fig)
+
+            # ── Iterative sampling for figure panels (true generative quality) ──
+            def _restore(x_s, t_s, c):
+                return self.model(x_s, t_s.to(self.device), c)
+            x_hat_iter = self.diffusion.robust_sampling(_restore, cond, self.device)
+            xh_iter_c = torch.view_as_complex(x_hat_iter.contiguous())
+
+            # Iterative amp ratio (primary generative quality metric)
+            iter_amp = torch.abs(xh_iter_c).mean().item()
+            writer.add_scalar(f'{prefix}/iter_amp_ratio', iter_amp / (target_amp + 1e-12), iter)
+
             # Use first sample for all figure panels
-            x0 = x0_c[0].cpu().numpy()     # [1024, 4] complex
-            xh = xh_c[0].cpu().numpy()     # [1024, 4] complex
+            x0 = x0_c[0].cpu().numpy()         # [1024, 4] complex
+            xh = xh_iter_c[0].cpu().numpy()    # [1024, 4] complex — iterative result
 
             # ── PSD overlay — one subplot per antenna ──────────────────────────
             fig, axes = plt.subplots(2, 2, figsize=(10, 7))
