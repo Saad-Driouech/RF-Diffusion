@@ -238,8 +238,8 @@ params_gnss = AttrDict(
     # diffusion
     signal_diffusion=True,
     max_step=100,
-    # noise_schedule=np.linspace(1e-4, 0.003, 100).tolist(),  # old linear schedule (caused t≈75 spike)
-    noise_schedule=_cosine_beta_schedule(100).tolist(),
+    noise_schedule=np.linspace(1e-4, 0.003, 100).tolist(),  # linear schedule; cosine caused noise_weight collapse at t=99
+    # noise_schedule=_cosine_beta_schedule(100).tolist(),  # broken: alpha_bar→0 makes noise_weight→0 at t=99
     blur_schedule=((1e-5)**2 * np.ones(100)).tolist(),
 
     # directories (override via CLI)

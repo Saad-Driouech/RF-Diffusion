@@ -172,13 +172,7 @@ class tfdiffLearner:
         cond = features['cond']  # cond, c, [B, C]
         B = data.shape[0]
         # random diffusion step, [B]
-        # For GNSS, bias toward hard (high-noise) timesteps so t=75/99 get more signal
-        if self.task_id == 4:
-            weights = (1.0 - self.diffusion.alpha_bar)  # [T], larger = harder
-            weights = weights / weights.sum()
-            t = torch.multinomial(weights.unsqueeze(0).expand(B, -1), num_samples=1).squeeze(1)
-        else:
-            t = torch.randint(0, self.diffusion.max_step, [B], dtype=torch.int64)
+        t = torch.randint(0, self.diffusion.max_step, [B], dtype=torch.int64)
         degrade_data = self.diffusion.degrade_fn(
             data, t ,self.task_id)  # degrade data, x_t, [B, N, S*A, 2]
         predicted = self.model(degrade_data, t, cond)
