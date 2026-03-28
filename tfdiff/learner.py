@@ -102,13 +102,16 @@ class tfdiffLearner:
             model_state = self.model.module.state_dict()
         else:
             model_state = self.model.state_dict()
-        return {
+        d = {
             'iter': self.iter,
             'model': {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in model_state.items()},
             'optimizer': {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in self.optimizer.state_dict().items()},
             'lr_scheduler': self.lr_scheduler.state_dict(),
             'params': dict(self.params),
         }
+        if self.lr_warmup_scheduler is not None:
+            d['lr_warmup_scheduler'] = self.lr_warmup_scheduler.state_dict()
+        return d
 
     def load_state_dict(self, state_dict):
         if hasattr(self.model, 'module') and isinstance(self.model.module, nn.Module):
@@ -118,6 +121,8 @@ class tfdiffLearner:
         self.optimizer.load_state_dict(state_dict['optimizer'])
         if 'lr_scheduler' in state_dict:
             self.lr_scheduler.load_state_dict(state_dict['lr_scheduler'])
+        if 'lr_warmup_scheduler' in state_dict and self.lr_warmup_scheduler is not None:
+            self.lr_warmup_scheduler.load_state_dict(state_dict['lr_warmup_scheduler'])
         self.iter = state_dict['iter']
 
     def save_to_checkpoint(self, filename='weights'):
