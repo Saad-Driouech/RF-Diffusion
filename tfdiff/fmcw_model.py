@@ -161,7 +161,8 @@ class FinalLayer(nn.Module):
             cm.ComplexSiLU(),
             cm.ComplexLinear(hidden_dim, 2*hidden_dim, bias=True)
         )
-        self.apply(init_weight_zero)
+        self.apply(init_weight_xavier)
+        self.adaLN_modulation.apply(init_weight_zero)
 
     def forward(self, x, c):
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
